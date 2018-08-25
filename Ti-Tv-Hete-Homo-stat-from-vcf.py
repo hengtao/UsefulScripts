@@ -55,14 +55,14 @@ def StatFromVcf(snpvcf, outstatfile, logger):
                         else:
                             progencydict[progencylist[i]]["Tinum"] += 1
     logger.info("Starting to write stat result ...")
-    with open(outstatfile , 'w+') as o:
+    with open(outstatfile , 'r+') as o:
         for progency in progencydict:
             o.write(progency + "\t" + progencydict[progency]["TotalSNP"] + "\t" +  progencydict[progency]["Tinum"] + "\t" + progencydict[progency]["Tvnum"] + "\t" + Baoliuxiaoshu(progencydict[progency]["Tinum"]/progencydict[progency]["Tvnum"], 2) + progencydict[progency]["TotalHete"] + "\t" + progencydict[progency]["TotalHomo"] + "\n" )
 
 def main(args):
     snpvcf = args.snpvcf
     outstatfile = args.statfile
-    logfile = args.logfile
+
 
     ## Import logger, 获取logger实例
     logger    = logging.getLogger(__name__)
