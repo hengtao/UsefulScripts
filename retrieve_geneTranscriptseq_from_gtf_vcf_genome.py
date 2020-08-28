@@ -26,8 +26,8 @@ def replaceseq(sequence, replacedict):
     return tmp
 
 def snpseq(seq, value, start, end,  vcfdict, strand, snpdict):
-    #maptrans = str.maketrans('ATCG', 'TAGC')
-    maptrans = string.maketrans('ATCG', 'TAGC')
+    maptrans = str.maketrans('ATCG', 'TAGC')
+    #maptrans = string.maketrans('ATCG', 'TAGC')
     seq = [i for i in seq]
     if value[0] in vcfdict:
         for posit in range(start, end):
@@ -56,8 +56,10 @@ def RetrieveSeq(args,logger):
     gff3 = args.gff3
     vcf = args.vcf
     genome = args.genome
-    genes = args.genenames
-    genelist = genes.split(",")
+    genefile = args.genefile
+    genes = os.popen("cat {genes}".format(genes = genefile)).read()
+    genelist = genes.split("\n")[:-1]
+    print(genelist)
     outdir = args.outdir
     gene = dict()
     mRNA = dict()
@@ -74,13 +76,13 @@ def RetrieveSeq(args,logger):
                 "B":"A/T]", "D":"A/C]", "E":"A/G]",
                 "F":"T/A]", "H":"T/C]", "I":"T/G]",
                 "J":"C/A]", "K":"C/T]", "L":"C/G]",
-                "M":"G/A]", "N":"G/T]", "O":"G/C]"
+                "M":"G/A]", "P":"G/T]", "O":"G/C]"
     }
     snpdict = {
                "AT":"B", "AC":"D", "AG":"E",
                "TA":"F", "TC":"H", "TG":"I",
                "CA":"J", "CT":"K", "CG":"L",
-               "GA":"M", "GT":"N", "GC":"O"
+               "GA":"M", "GT":"P", "GC":"O"
                }
 
     logger.info("Processing genome fa file...")
@@ -112,13 +114,13 @@ def RetrieveSeq(args,logger):
     with open(gff3, 'r') as f:
         for line in f:
             if not line.startswith("#"):
-                linecontent = line.strip().split()
+                linecontent = line.strip().split("\t")
                 chr = linecontent[0]
                 feature = linecontent[2]
                 start = linecontent[3]
                 end = linecontent[4]
                 direction = linecontent[6]
-                name = linecontent[8].split(";")[0].replace("ID=","")
+                name = linecontent[8].split(";")[0].replace("ID=","").replace("gene_id ","").replace('"',"")
                 if feature == "gene":
                     for genename in genelist:
                         if genename == name:
@@ -132,7 +134,8 @@ def RetrieveSeq(args,logger):
                             break
                         else:
                             flag = 0
-                elif feature == "mRNA" and flag ==1:
+                elif (feature == "mRNA" or feature == "transcript") and flag ==1:
+                    name = linecontent[8].split(";")[2].replace("ID=","").replace("transcript_id ","").replace('"',"")
                     mRNAname = name
                     mRNA[dictname].append(mRNAname)
                     mRNAdict[mRNAname] = [chr, start, end, direction]
@@ -140,11 +143,13 @@ def RetrieveSeq(args,logger):
                     utr5[dictname][mRNAname] = []
                     utr3[dictname][mRNAname] = []
                     cds[dictname][mRNAname] = []
-                elif feature == "three_prime_UTR" and flag == 1:
+                elif (feature == "three_prime_UTR" or feature == "three_prime_utr") and flag == 1:
                     utr3[dictname][mRNAname].append([chr, start, end])
-                elif feature == "five_prime_UTR" and flag == 1:
+                elif (feature == "five_prime_UTR" or feature == "five_prime_utr") and flag == 1:
                     utr5[dictname][mRNAname].append([chr, start, end])
-                elif feature == "CDS" and flag == 1:
+                elif (feature == "CDS" or feature == "cds" or feature == "stop_codon" or feature == "Stop_codon") and flag == 1:
+                    #print("dictname:" + dictname)
+                    #print("mRNAname:" + mRNAname)
                     cds[dictname][mRNAname].append([chr, start, end])
     tmplist = list()
     for key, value in gene.items():
@@ -187,12 +192,13 @@ def RetrieveSeq(args,logger):
                                 sequence = snpseq(seq, value, start, end, vcfdict, strand, snpdict)
                                 o.write("##UTR5##{utr5}\n".format(utr5 = sequence))
                                 if suffix + 3 < len(tmplist):
-                                    seq = record_dict[value[0]][int(tmplist[suffix + 1]):int(tmplist[suffix + 2])].seq
+                                    seq = record_dict[value[0]][int(tmplist[suffix + 1]):int(tmplist[suffix + 2])-1].seq
                                     start = int(tmplist[suffix + 1])
-                                    end = int(tmplist[suffix + 2])
-                                    sequence = snpseq(seq, value, start, end, vcfdict, strand, snpdict)
-                                    sequence = replaceseq(sequence, replace)
-                                    o.write("##INTRON##{intron}\n".format(intron = sequence))
+                                    end = int(tmplist[suffix + 2])-1
+                                    if start != end:
+                                        sequence = snpseq(seq, value, start, end, vcfdict, strand, snpdict)
+                                        sequence = replaceseq(sequence, replace)
+                                        o.write("##INTRON##{intron}\n".format(intron = sequence))
                             tmplist = list()
 
                     if cds[key][mRNAname]:
@@ -225,6 +231,7 @@ def RetrieveSeq(args,logger):
                                 seq = record_dict[value[0]][int(tmplist[suffix])-1:int(tmplist[suffix + 1])].seq
                                 start = int(tmplist[suffix])-1
                                 end = int(tmplist[suffix + 1])
+                                print (mRNAname + ":" + str(start) + ":" + str(end))
                                 sequence = snpseq(seq, value, start, end, vcfdict, strand, snpdict)
                                 seqtmp = []
                                 if remainder == 3:
@@ -269,12 +276,14 @@ def RetrieveSeq(args,logger):
                                 sequence = replaceseq(sequence, replace)
                                 o.write("##CDS##{cds}\n".format(cds = sequence))
                                 if suffix + 3 < len(tmplist):
-                                    seq = record_dict[value[0]][int(tmplist[suffix + 1]):int(tmplist[suffix + 2])].seq
+                                    seq = record_dict[value[0]][int(tmplist[suffix + 1]):int(tmplist[suffix + 2])-1].seq
                                     start = int(tmplist[suffix + 1])
-                                    end = int(tmplist[suffix + 2])
-                                    sequence = snpseq(seq, value, start, end, vcfdict, strand, snpdict)
-                                    sequence = replaceseq(sequence, replace)
-                                    o.write("##INTRON##{intron}\n".format(intron = sequence))
+                                    end = int(tmplist[suffix + 2])-1
+                                    #print (mRNAname + ":" + str(start) + ":" + str(end))
+                                    if end != start:
+                                        sequence = snpseq(seq, value, start, end, vcfdict, strand, snpdict)
+                                        sequence = replaceseq(sequence, replace)
+                                        o.write("##INTRON##{intron}\n".format(intron = sequence))
                             tmplist = list()
                     if utr3[key][mRNAname]:
                         if len(utr3[key][mRNAname]) == 1:
@@ -296,14 +305,15 @@ def RetrieveSeq(args,logger):
                                 sequence = replaceseq(sequence, replace)
                                 o.write("##UTR3##{utr3}\n".format(utr3=sequence))
                                 if suffix + 3 < len(tmplist):
-                                    seq = record_dict[value[0]][int(tmplist[suffix + 1]):int(tmplist[suffix + 2])].seq
+                                    seq = record_dict[value[0]][int(tmplist[suffix + 1]):int(tmplist[suffix + 2])-1].seq
                                     #start = int(tmplist[suffix + 1]) + 1
                                     #end = int(tmplist[suffix + 2]) - 1
                                     start = int(tmplist[suffix + 1])
-                                    end = int(tmplist[suffix + 2])
-                                    sequence = snpseq(seq, value, start, end, vcfdict, strand, snpdict)
-                                    sequence = replaceseq(sequence, replace)
-                                    o.write("##INTRON##{intron}\n".format(intron=sequence))
+                                    end = int(tmplist[suffix + 2])-1
+                                    if end != start:
+                                        sequence = snpseq(seq, value, start, end, vcfdict, strand, snpdict)
+                                        sequence = replaceseq(sequence, replace)
+                                        o.write("##INTRON##{intron}\n".format(intron=sequence))
                             tmplist = list()
                     seq = record_dict[value[0]][int(mRNAdict[mRNAname][2]) + 1:int(mRNAdict[mRNAname][2])+5001].seq
                     start = int(mRNAdict[mRNAname][2]) + 1
@@ -355,12 +365,13 @@ def RetrieveSeq(args,logger):
                                 sequence = replaceseq(sequence, replace)
                                 o.write("##UTR5##{utr5}\n".format(utr5=sequence))
                                 if suffix + 3 < len(tmplist):
-                                    seq = record_dict[value[0]][int(tmplist[suffix + 3]):int(tmplist[suffix])].seq.reverse_complement()
+                                    seq = record_dict[value[0]][int(tmplist[suffix + 3]):int(tmplist[suffix])-1].seq.reverse_complement()
                                     start = int(tmplist[suffix + 3])
-                                    end = int(tmplist[suffix])
-                                    sequence = snpseq(seq, value, start, end, vcfdict, strand, snpdict)
-                                    sequence = replaceseq(sequence, replace)
-                                    o.write("##INTRON##{intron}\n".format(intron=sequence))
+                                    end = int(tmplist[suffix])-1
+                                    if start != end:
+                                        sequence = snpseq(seq, value, start, end, vcfdict, strand, snpdict)
+                                        sequence = replaceseq(sequence, replace)
+                                        o.write("##INTRON##{intron}\n".format(intron=sequence))
                             tmplist = list()
                     if cds[key][mRNAname]:
                         if len(cds[key][mRNAname]) == 1:
@@ -437,12 +448,13 @@ def RetrieveSeq(args,logger):
                                 o.write("##CDS##{cds}\n".format(cds=sequence))
 
                                 if suffix + 3 < len(tmplist):
-                                    seq = record_dict[value[0]][int(tmplist[suffix + 3]):int(tmplist[suffix])].seq.reverse_complement()
+                                    seq = record_dict[value[0]][int(tmplist[suffix + 3]):int(tmplist[suffix])-1].seq.reverse_complement()
                                     start = int(tmplist[suffix + 3])
-                                    end = int(tmplist[suffix])
-                                    sequence = snpseq(seq, value, start, end, vcfdict, strand, snpdict)
-                                    sequence = replaceseq(sequence, replace)
-                                    o.write("##INTRON##{intron}\n".format(intron=sequence))
+                                    end = int(tmplist[suffix])-1
+                                    if start != end:
+                                        sequence = snpseq(seq, value, start, end, vcfdict, strand, snpdict)
+                                        sequence = replaceseq(sequence, replace)
+                                        o.write("##INTRON##{intron}\n".format(intron=sequence))
                             tmplist = list()
                     if utr3[key][mRNAname]:
                         if len(utr3[key][mRNAname]) == 1:
@@ -464,12 +476,13 @@ def RetrieveSeq(args,logger):
                                 sequence = replaceseq(sequence, replace)
                                 o.write("##UTR3##{utr3}\n".format(utr3=sequence))
                                 if suffix + 3 < len(tmplist):
-                                    seq = record_dict[value[0]][int(tmplist[suffix + 3]):int(tmplist[suffix])].seq.reverse_complement()
+                                    seq = record_dict[value[0]][int(tmplist[suffix + 3]):int(tmplist[suffix])-1].seq.reverse_complement()
                                     start = int(tmplist[suffix + 3])
-                                    end = int(tmplist[suffix])
-                                    sequence = snpseq(seq, value, start, end, vcfdict, strand, snpdict)
-                                    sequence = replaceseq(sequence, replace)
-                                    o.write("##INTRON##{intron}\n".format(intron=sequence))
+                                    end = int(tmplist[suffix])-1
+                                    if start != end:
+                                        sequence = snpseq(seq, value, start, end, vcfdict, strand, snpdict)
+                                        sequence = replaceseq(sequence, replace)
+                                        o.write("##INTRON##{intron}\n".format(intron=sequence))
                             tmplist = list()
                     seq = record_dict[value[0]][int(mRNAdict[mRNAname][1]) - 5002:int(mRNAdict[mRNAname][1])-1].seq.reverse_complement()
                     start = int(mRNAdict[mRNAname][1]) - 5002
@@ -514,7 +527,7 @@ python3 {scriptpath}/retrieve_geneseq_from_gtf_vcf_genome.py -gff3 <gff3> -vcf <
     parse.add_argument('-gff3', '--gff3', required = True, dest = "gff3", help = "genome annotation gff3 file", type = str, nargs = '?')
     parse.add_argument('-vcf', '--vcf', required = True, dest = "vcf", help = "snp vcf file", type = str, nargs = '?')
     parse.add_argument('-genome', '--genome', required=True, dest="genome", help="genome fa file", type=str, nargs='?')
-    parse.add_argument('-genenames', '--genenames', required=True, dest="genenames", help="comma delimited gene names", type=str, nargs='?')
+    parse.add_argument('-genefile', '--genefile', required=True, dest="genefile", help="file contains comma delimited gene names", type=str, nargs='?')
     parse.add_argument('-outdir', '--outdir', required=True, dest="outdir", help="output dir", type=str, nargs='?')
     parse.add_argument('-logfile', '--logfile', required = True, dest = "logfile", help = "Log file to record procedures of processing of this script", metavar = "Log file to record procedures of processing of this script", type = str, nargs = '?')
 
@@ -522,4 +535,6 @@ python3 {scriptpath}/retrieve_geneseq_from_gtf_vcf_genome.py -gff3 <gff3> -vcf <
     args = parse.parse_args()
 
     main(args)
+
+
 
